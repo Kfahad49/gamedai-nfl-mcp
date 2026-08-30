@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools==83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gamedai-nfl-mcp"
+version = "0.2.0"
+description = "MIT-licensed MCP server for querying the public gamedai NFL backend."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "gamedai" }]
+keywords = ["mcp", "nfl", "sports", "fantasy-football", "knowledge-graph", "interactive-sports-radio", "gamedai", "ai-agents"]
+dependencies = [
+  "httpx==0.28.1",
+  "mcp==1.28.1",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest==9.0.3",
+]
+
+[project.scripts]
+gamedai-nfl-mcp = "gamedai_mcp.server:main"
+
+[project.urls]
+Homepage = "https://gamedai.app"
+Documentation = "https://gamedai.app"
+Repository = "https://github.com/omniviewai/gamedai-nfl-mcp"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

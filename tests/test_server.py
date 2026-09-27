@@ -3,13 +3,14 @@ from __future__ import annotations
 import inspect
 import sys
 import types
-from datetime import date
 from typing import Any
+
+from datetime import date
 
 from gamedai_mcp.server import (
     build_arg_parser,
     build_mcp_server,
-    current_nfl_season,
+    current_nfl_league_year,
     latest_complete_nfl_season,
 )
 
@@ -112,9 +113,7 @@ def test_healthz_route_is_registered(monkeypatch) -> None:
     ).parameters
     assert start_sit_parameters["week"].default is inspect.Parameter.empty
     assert start_sit_parameters["season"].default is None
-    assert "season" not in inspect.signature(
-        mcp.tool_functions["get_scout_rankings"]
-    ).parameters
+    assert "season" not in inspect.signature(mcp.tool_functions["get_scout_rankings"]).parameters
     assert set(mcp.tools) == {
         "get_game_scores",
         "get_wire_news",
@@ -129,10 +128,10 @@ def test_season_default_uses_latest_complete_calendar_season() -> None:
     assert latest_complete_nfl_season(date(2026, 2, 28)) == 2024
 
 
-def test_current_nfl_season_rolls_over_in_march() -> None:
-    assert current_nfl_season(date(2026, 9, 27)) == 2026
-    assert current_nfl_season(date(2027, 2, 10)) == 2026
-    assert current_nfl_season(date(2027, 3, 1)) == 2027
+def test_start_sit_defaults_to_current_league_year() -> None:
+    assert current_nfl_league_year(date(2026, 8, 30)) == 2026
+    assert current_nfl_league_year(date(2027, 1, 15)) == 2026
+    assert current_nfl_league_year(date(2026, 3, 1)) == 2026
 
 
 def _build_with_fake_client(monkeypatch, calls: list[dict[str, Any]]) -> Any:
@@ -149,7 +148,7 @@ def _build_with_fake_client(monkeypatch, calls: list[dict[str, Any]]) -> Any:
     monkeypatch.setitem(sys.modules, "starlette.responses", response_module)
 
     class FakeClient:
-        async def __aenter__(self) -> FakeClient:
+        async def __aenter__(self) -> "FakeClient":
             return self
 
         async def __aexit__(self, *_exc: Any) -> None:
@@ -161,7 +160,7 @@ def _build_with_fake_client(monkeypatch, calls: list[dict[str, Any]]) -> Any:
 
         async def rankings(self, *, position, scoring, week):
             calls.append({"week": week})
-            return {"tier": "public_degraded", "rankings": []}
+            return {"tier": "public_degraded", "rankings": [], "source_week": None}
 
     import gamedai_mcp.client as client_module
 
@@ -169,36 +168,35 @@ def _build_with_fake_client(monkeypatch, calls: list[dict[str, Any]]) -> Any:
     return build_mcp_server(), asyncio.run
 
 
-def test_start_sit_defaults_to_current_season_and_echoes_it(monkeypatch) -> None:
+def test_start_sit_echoes_requested_season_and_week(monkeypatch) -> None:
     calls: list[dict[str, Any]] = []
     mcp, run = _build_with_fake_client(monkeypatch, calls)
-    expected = current_nfl_season()
+    expected = current_nfl_league_year()
 
     result = run(mcp.tool_functions["get_start_sit_recommendation"]("A", "B", 4))
 
     assert calls == [{"season": expected, "week": 4}]
-    assert result["season"] == expected
-    assert result["week"] == 4
-    assert result["grounded"] is False
+    assert result["requested_season"] == expected
+    assert result["requested_week"] == 4
+    assert "season" not in result, "the request must not masquerade as the source"
 
 
-def test_start_sit_explicit_season_is_passed_through_and_echoed(monkeypatch) -> None:
-    calls: list[dict[str, Any]] = []
-    mcp, run = _build_with_fake_client(monkeypatch, calls)
-
-    result = run(mcp.tool_functions["get_start_sit_recommendation"]("A", "B", 4, season=2025))
-
-    assert calls == [{"season": 2025, "week": 4}]
-    assert result["season"] == 2025
-
-
-def test_rankings_echo_requested_week_including_none(monkeypatch) -> None:
+def test_rankings_echo_requested_week_without_touching_source_week(monkeypatch) -> None:
     calls: list[dict[str, Any]] = []
     mcp, run = _build_with_fake_client(monkeypatch, calls)
 
     current = run(mcp.tool_functions["get_scout_rankings"]())
     explicit = run(mcp.tool_functions["get_scout_rankings"](week=1))
 
-    assert current["week"] is None
-    assert explicit["week"] == 1
+    assert current["requested_week"] is None
+    assert explicit["requested_week"] == 1
+    assert explicit["source_week"] is None
     assert calls == [{"week": None}, {"week": 1}]
+
+
+def test_request_context_is_not_added_to_error_results(monkeypatch) -> None:
+    from gamedai_mcp.server import _with_request_context
+
+    error = {"code": "upstream_error", "http_status": 503, "message": "down"}
+
+    assert _with_request_context(error, week=3) == error

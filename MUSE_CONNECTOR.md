@@ -97,20 +97,28 @@ Fields that are null are unknown, not zero and not "current".
 
 ## Data freshness, verified 2026-09-27
 
-- Start/sit projections are loaded by the manual
-  `backend/scripts/backfill_sleeper_projections.py`; there is no scheduled
-  refresh. A 2026 week is only as fresh as the last run for that week.
-  Sleeper's free feed had usable PPR points for 2026 weeks 3, 4, and 5 when
-  checked (about 1,000 players per week with points, Josh Allen included),
-  so a run for the current week would load real numbers. Whether the
-  production table already holds them was not checked; that needs DB access.
+- Projection rows (Sleeper, ESPN, FantasyPros) are written by a daily
+  `projection_refresh` cron at 04:00 UTC, gated by
+  `PROJECTION_REFRESH_ENABLED`, plus the manual
+  `backend/scripts/backfill_sleeper_projections.py`. The backend's `/healthz`
+  reports `projection_refresh_freshness`. On 2026-09-27 it showed the last
+  refresh at 2026-09-06 covering 2026 weeks 1 and 2 only (Sleeper 9,383
+  rows, ESPN 320, FantasyPros 609 to 781 per week). Weeks 3 to 5 have no
+  refreshed rows. Sleeper's free feed had usable PPR points for weeks 3 to 5
+  when checked, so a refresh would load real numbers. Whether the cron is
+  enabled on the preview app was not visible from outside.
 - Rankings are fetched live from FantasyPros for the current calendar-year
-  season. An omitted week means the source's current week.
-- A start/sit "tie" for a 2026 week with `grounded: true` was a bug:
-  projection rows existed with null points and compared as 0.0 to 0.0. Fixed
-  in the backend; a missing projection is now ungrounded and the rationale
-  names the player without naming a feed, since the loader reads ESPN and
-  Sleeper rows and cannot tell which one was empty.
+  season. `source_week: 0` is FantasyPros' own value for the season-level
+  board when no week is requested; `source_week: 4` came back for an
+  explicit week 4 request.
+- The start/sit "tie" for 2026 weeks with `grounded: true` has two causes.
+  The first, rows with null points comparing as 0.0 to 0.0, is fixed and
+  deployed. The second is still live: the start/sit confidence engine
+  (`startsit_confidence/serving_pipeline.py`) marks a player as found once
+  the name resolves, then fills every missing feature with the training
+  median. Two players with no current-season stats get the identical
+  projection and tie. The public pick sees a real number and calls it
+  grounded. Fix not yet proposed as code; see the PR discussion.
 
 ## Verification status
 
@@ -132,6 +140,22 @@ Exercised end to end with a raw streamable HTTP client, no credentials, on
 
 These prove the endpoint works for a generic MCP client. They do not prove
 Muse used it.
+
+Repeated after omniviewai/gamedai#1964 deployed (2026-09-27 21:35 UTC, both
+Fly apps green, server still reports 1.28.1):
+
+- Scores: 14 games, 4 live. News: 3 articles. Grade: Josh Allen A+,
+  `stats_season: 2025`, nflverse attribution.
+- Start/sit 2025 week 4: `requested_season: 2025`, `requested_week: 4`,
+  grounded pick crediting Sleeper.
+- Start/sit 2026 week 4: `requested_season: 2026`, `requested_week: 4`,
+  still `recommendation: null`, `grounded: true`, tie rationale. The engine
+  median-imputation cause above is why; the null-row fix alone did not
+  change this response. One call during the deploy restart returned
+  `backend_unavailable`; two retries succeeded.
+- Rankings QB PPR: `requested_week: null`, `source_status: ok`,
+  `source_season: 2026`, `source_week: 0`, 50 rows. With `week=4`:
+  `requested_week: 4`, `source_week: 4`, 35 rows.
 
 ### Checks run inside Muse
 

@@ -3,13 +3,13 @@ from __future__ import annotations
 import inspect
 import sys
 import types
-from typing import Any
-
 from datetime import date
+from typing import Any
 
 from gamedai_mcp.server import (
     build_arg_parser,
     build_mcp_server,
+    current_nfl_season,
     latest_complete_nfl_season,
 )
 
@@ -127,3 +127,78 @@ def test_healthz_route_is_registered(monkeypatch) -> None:
 def test_season_default_uses_latest_complete_calendar_season() -> None:
     assert latest_complete_nfl_season(date(2026, 8, 30)) == 2025
     assert latest_complete_nfl_season(date(2026, 2, 28)) == 2024
+
+
+def test_current_nfl_season_rolls_over_in_march() -> None:
+    assert current_nfl_season(date(2026, 9, 27)) == 2026
+    assert current_nfl_season(date(2027, 2, 10)) == 2026
+    assert current_nfl_season(date(2027, 3, 1)) == 2027
+
+
+def _build_with_fake_client(monkeypatch, calls: list[dict[str, Any]]) -> Any:
+    import asyncio
+
+    fastmcp_module = types.ModuleType("mcp.server.fastmcp")
+    fastmcp_module.FastMCP = FakeFastMCP
+    mcp_types_module = types.ModuleType("mcp.types")
+    mcp_types_module.ToolAnnotations = lambda **kwargs: kwargs
+    response_module = types.ModuleType("starlette.responses")
+    response_module.JSONResponse = FakeJSONResponse
+    monkeypatch.setitem(sys.modules, "mcp.server.fastmcp", fastmcp_module)
+    monkeypatch.setitem(sys.modules, "mcp.types", mcp_types_module)
+    monkeypatch.setitem(sys.modules, "starlette.responses", response_module)
+
+    class FakeClient:
+        async def __aenter__(self) -> FakeClient:
+            return self
+
+        async def __aexit__(self, *_exc: Any) -> None:
+            return None
+
+        async def start_sit(self, player_a, player_b, season, week):
+            calls.append({"season": season, "week": week})
+            return {"tier": "public_degraded", "recommendation": None, "grounded": False}
+
+        async def rankings(self, *, position, scoring, week):
+            calls.append({"week": week})
+            return {"tier": "public_degraded", "rankings": []}
+
+    import gamedai_mcp.client as client_module
+
+    monkeypatch.setattr(client_module, "GamedaiClient", FakeClient)
+    return build_mcp_server(), asyncio.run
+
+
+def test_start_sit_defaults_to_current_season_and_echoes_it(monkeypatch) -> None:
+    calls: list[dict[str, Any]] = []
+    mcp, run = _build_with_fake_client(monkeypatch, calls)
+    expected = current_nfl_season()
+
+    result = run(mcp.tool_functions["get_start_sit_recommendation"]("A", "B", 4))
+
+    assert calls == [{"season": expected, "week": 4}]
+    assert result["season"] == expected
+    assert result["week"] == 4
+    assert result["grounded"] is False
+
+
+def test_start_sit_explicit_season_is_passed_through_and_echoed(monkeypatch) -> None:
+    calls: list[dict[str, Any]] = []
+    mcp, run = _build_with_fake_client(monkeypatch, calls)
+
+    result = run(mcp.tool_functions["get_start_sit_recommendation"]("A", "B", 4, season=2025))
+
+    assert calls == [{"season": 2025, "week": 4}]
+    assert result["season"] == 2025
+
+
+def test_rankings_echo_requested_week_including_none(monkeypatch) -> None:
+    calls: list[dict[str, Any]] = []
+    mcp, run = _build_with_fake_client(monkeypatch, calls)
+
+    current = run(mcp.tool_functions["get_scout_rankings"]())
+    explicit = run(mcp.tool_functions["get_scout_rankings"](week=1))
+
+    assert current["week"] is None
+    assert explicit["week"] == 1
+    assert calls == [{"week": None}, {"week": 1}]

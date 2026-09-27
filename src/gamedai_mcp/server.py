@@ -5,11 +5,11 @@ import argparse
 import asyncio
 import inspect
 import os
+from collections.abc import Awaitable, Callable
 from datetime import date
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 import httpx
-
 
 ToolResult = dict[str, Any]
 ToolCall = Callable[..., Awaitable[ToolResult]]
@@ -39,6 +39,28 @@ def latest_complete_nfl_season(today: date | None = None) -> int:
     """Return the latest complete NFL stats season from the calendar clock."""
     current = today or date.today()
     return current.year - 1 if current.month >= 3 else current.year - 2
+
+
+def current_nfl_season(today: date | None = None) -> int:
+    """Return the NFL season in progress or next up from the calendar clock.
+
+    A start/sit question is about a week that has not been played, so it is
+    asked against the current season. Before March the season that started
+    the previous September is still the current one.
+    """
+    current = today or date.today()
+    return current.year if current.month >= 3 else current.year - 1
+
+
+def _with_query_context(result: ToolResult, **context: Any) -> ToolResult:
+    """Echo the season/week the backend was asked for on a successful result.
+
+    The backend routes do not echo them, so a caller that let the server pick
+    the season could not tell a current-week answer from a historical one.
+    """
+    if "code" in result and "http_status" in result:
+        return result
+    return {**context, **result}
 
 
 def _tool_error(exc: Any) -> ToolResult:
@@ -142,14 +164,17 @@ def build_mcp_server(*, host: str = "127.0.0.1", port: int = 8080) -> Any:
         week: int,
         season: int | None = None,
     ) -> ToolResult:
-        """Return a public Scout start/sit comparison."""
-        effective_season = (
-            season if season is not None else latest_complete_nfl_season()
-        )
+        """Return a public Scout start/sit comparison for a week of the current season.
+
+        Pass `season` to ask about a past season. The result echoes the season
+        and week it answered for.
+        """
+        effective_season = season if season is not None else current_nfl_season()
         async with GamedaiClient() as client:
-            return await _call_tool(
+            result = await _call_tool(
                 lambda: client.start_sit(player_a, player_b, effective_season, week)
             )
+        return _with_query_context(result, season=effective_season, week=week)
 
     @mcp.tool(annotations=annotations)
     async def get_scout_rankings(
@@ -157,15 +182,20 @@ def build_mcp_server(*, host: str = "127.0.0.1", port: int = 8080) -> Any:
         scoring: str = "PPR",
         week: int | None = None,
     ) -> ToolResult:
-        """Return the public Scout rankings board."""
+        """Return the public Scout rankings board (FantasyPros consensus).
+
+        Omit `week` for the source's current week. The result echoes the week
+        it was asked for; `week: null` means the source chose the week.
+        """
         async with GamedaiClient() as client:
-            return await _call_tool(
+            result = await _call_tool(
                 lambda: client.rankings(
                     position=position,
                     scoring=scoring,
                     week=week,
                 )
             )
+        return _with_query_context(result, week=week)
 
     return mcp
 

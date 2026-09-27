@@ -85,12 +85,28 @@ Exercised end to end with a raw streamable HTTP client, no credentials:
 - `get_game_scores` returned the live Sunday slate with in-progress clocks.
 - `get_wire_news(page_size=3)` returned three current articles with sources.
 - `get_player_grade("Josh Allen")` returned an A+ with nflverse attribution.
-- `get_start_sit_recommendation` and `get_scout_rankings` returned valid data
-  at `tier: public_degraded`. That field is set by the backend, and the
-  preview backend returns the same tier with no key and with an invalid key,
-  so the cause is on the backend side, not a missing MCP-side key. Check the
-  backend's Scout tier logic before Meta's end-to-end test if full-tier output
-  is wanted in the directory listing.
+- `get_start_sit_recommendation` and `get_scout_rankings` returned
+  `tier: public_degraded`. That value is a hardcoded literal on both backend
+  routes (`backend/app/routers/scout.py`). It is the name of the free public
+  tier, it is the only tier those routes can return, and it has nothing to do
+  with API keys. The preview backend has no Scout keys configured, so a
+  missing or invalid key changes nothing there.
+- The null start/sit recommendation for a 2026 week was a bug, now fixed on
+  the backend side: projection rows for the current season existed with no
+  points, and two nulls compared as a 0.0 to 0.0 tie labelled `grounded`.
+  The backend now reports that as ungrounded and names the player with no
+  Sleeper projection for that week. Real ties still return `grounded: true`.
+- Start/sit is only as fresh as the last manual run of
+  `backend/scripts/backfill_sleeper_projections.py`; there is no scheduled
+  refresh. Run it for the current week before Meta's end-to-end test.
+- Rankings come live from FantasyPros for the current calendar-year season;
+  `week` omitted means FantasyPros' current week, and an out-of-range week
+  returns an empty list rather than stale rows.
+- Player grades cite `stats_season` (2025) and nflverse attribution in every
+  response; that is the latest complete stats season, not the live one.
+- This server now defaults start/sit to the current NFL season and echoes
+  `season` and `week` on start/sit and `week` on rankings, so an agent can
+  say which week an answer is for. Before this, an omitted season meant 2025.
 
 These checks prove the endpoint works for a generic MCP client. They do not
 prove Muse itself has used the tools. That is only established by running the

@@ -57,7 +57,7 @@ non-destructive. Grades cite their data source and license in every response.
 | Hosted MCP endpoint | https://gamedai-mcp.fly.dev/mcp |
 | Documentation | https://github.com/omniviewai/gamedai-nfl-mcp |
 | Authentication | None. Public, unauthenticated. |
-| Access requirements | No account needed. No regional limits. Backend errors return structured `code` / `http_status` / `message` objects, never stack traces. Scout tools may return `tier: public_degraded` when the backend is serving public-tier data. |
+| Access requirements | No account needed. No regional limits. Backend errors return structured `code` / `http_status` / `message` objects, never stack traces. Scout tools may return `tier: public_degraded` when the backend is serving public-tier data; this is a backend state, not a client auth failure. |
 
 ### Review
 
@@ -86,9 +86,15 @@ Exercised end to end with a raw streamable HTTP client, no credentials:
 - `get_wire_news(page_size=3)` returned three current articles with sources.
 - `get_player_grade("Josh Allen")` returned an A+ with nflverse attribution.
 - `get_start_sit_recommendation` and `get_scout_rankings` returned valid data
-  at `tier: public_degraded`, meaning `GAMEDAI_SCOUT_API_KEY` is not set on
-  the Fly app. Set it before Meta's end-to-end test if full-tier Scout output
+  at `tier: public_degraded`. That field is set by the backend, and the
+  preview backend returns the same tier with no key and with an invalid key,
+  so the cause is on the backend side, not a missing MCP-side key. Check the
+  backend's Scout tier logic before Meta's end-to-end test if full-tier output
   is wanted in the directory listing.
+
+These checks prove the endpoint works for a generic MCP client. They do not
+prove Muse itself has used the tools. That is only established by running the
+custom-integration prompt above inside Muse, or by Meta's end-to-end review.
 
 No Scout key is ever sent to the MCP client. The same considerations in
 `CHATGPT_APP.md` about key enforcement and `/readyz` apply here.

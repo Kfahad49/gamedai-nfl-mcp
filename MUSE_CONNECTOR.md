@@ -135,10 +135,23 @@ Muse used it.
 
 ### Checks run inside Muse
 
-None recorded yet. No Muse session transcript or result has been provided to
-this repo. When one is, record it here with the date, the prompt used, the
-tool calls Muse made, and what it answered, so it is not confused with the
-generic checks above.
+User-reported, 2026-09-27, against the server as deployed before the fixes
+in omniviewai/gamedai#1964. Not reproduced from this repo.
+
+- Muse first failed on its SSE client, corrected it, then called all five
+  tools successfully.
+- `get_wire_news` returned 10 articles.
+- `get_player_grade` for Josh Allen showed `stats_season: 2025`.
+- `get_start_sit_recommendation` returned a null recommendation with
+  `tier: public_degraded` (the null-projection "tie" described above).
+- `get_scout_rankings` returned 50 QBs with `tier: public_degraded` and no
+  source week (the field did not exist yet).
+
+This demonstrates connectivity from Muse. It does not validate the pending
+fixes. After #1964 deploys, repeat these calls through Muse and confirm:
+`requested_*` and `source_*` fields on rankings, `source_status` explaining
+any empty list, and a missing projection reported as `grounded: false` with
+the player named and no feed named.
 
 No Scout key is ever sent to the MCP client. The same considerations in
 `CHATGPT_APP.md` about key enforcement and `/readyz` apply here.

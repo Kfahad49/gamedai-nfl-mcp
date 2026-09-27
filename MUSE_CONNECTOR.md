@@ -101,24 +101,31 @@ Fields that are null are unknown, not zero and not "current".
   `projection_refresh` cron at 04:00 UTC, gated by
   `PROJECTION_REFRESH_ENABLED`, plus the manual
   `backend/scripts/backfill_sleeper_projections.py`. The backend's `/healthz`
-  reports `projection_refresh_freshness`. On 2026-09-27 it showed the last
-  refresh at 2026-09-06 covering 2026 weeks 1 and 2 only (Sleeper 9,383
-  rows, ESPN 320, FantasyPros 609 to 781 per week). Weeks 3 to 5 have no
-  refreshed rows. Sleeper's free feed had usable PPR points for weeks 3 to 5
-  when checked, so a refresh would load real numbers. Whether the cron is
-  enabled on the preview app was not visible from outside.
+  reports `projection_refresh_freshness`, which is a record of the cron's
+  last run, not a census of the table. On 2026-09-27 it showed the last
+  cron run at 2026-09-06 covering 2026 weeks 1 and 2. Rows written by the
+  manual script would not appear there, so this does not prove weeks 3 to 5
+  are absent; it proves the cron has not written them. Actual coverage
+  needs a DB query. Sleeper's free feed had usable PPR points for weeks 3
+  to 5 when checked.
 - Rankings are fetched live from FantasyPros for the current calendar-year
-  season. `source_week: 0` is FantasyPros' own value for the season-level
-  board when no week is requested; `source_week: 4` came back for an
-  explicit week 4 request.
+  season. `source_week` is what the FantasyPros body reports. With no week
+  requested it returned `0`, which is not a week number and does not
+  establish that the board is current-week; treat it as "the source's
+  default board, week unspecified". With `week=4` requested it returned `4`.
 - The start/sit "tie" for 2026 weeks with `grounded: true` has two causes.
   The first, rows with null points comparing as 0.0 to 0.0, is fixed and
-  deployed. The second is still live: the start/sit confidence engine
-  (`startsit_confidence/serving_pipeline.py`) marks a player as found once
-  the name resolves, then fills every missing feature with the training
-  median. Two players with no current-season stats get the identical
-  projection and tie. The public pick sees a real number and calls it
-  grounded. Fix not yet proposed as code; see the PR discussion.
+  deployed. The second is the start/sit confidence engine
+  (`startsit_confidence/serving_pipeline.py`): it marked a player as found
+  once the name resolved, then filled every missing feature with the
+  training median, so two players with no current-season history got the
+  identical projection. A follow-up fix makes such a player unsupported
+  (no observed rolling-history feature at all), which sends the sources
+  layer to its stored-projection-row fallback. With rows, the rows decide;
+  with none, the public answer is unavailable. Legitimate all-zero
+  histories and genuine ties are unchanged. So a projection backfill does
+  affect the answer once that fix is deployed, through the fallback, even
+  though it does not change what the engine itself predicts.
 
 ## Verification status
 

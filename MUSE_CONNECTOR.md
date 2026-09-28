@@ -178,11 +178,27 @@ in omniviewai/gamedai#1964. Not reproduced from this repo.
 - `get_scout_rankings` returned 50 QBs with `tier: public_degraded` and no
   source week (the field did not exist yet).
 
-This demonstrates connectivity from Muse. It does not validate the pending
-fixes. After #1964 deploys, repeat these calls through Muse and confirm:
-`requested_*` and `source_*` fields on rankings, `source_status` explaining
-any empty list, and a missing projection reported as `grounded: false` with
-the player named and no feed named.
+This demonstrates connectivity from Muse. It does not validate the fixes.
+
+User-reported, 2026-09-27 20:46 local, after omniviewai/gamedai#1964 and
+#1966 deployed. `get_start_sit_recommendation` for Josh Allen vs Lamar
+Jackson, season 2026 passed explicitly, week 4:
+
+- `requested_season: 2026`, `requested_week: 4`, `tier: public_degraded`
+- `recommendation: null`, `grounded: false`, `isError: false`
+- rationale: "We can't compare these two right now, so we're not going to
+  guess. Projection data is unavailable."
+
+That is the expected post-fix answer: an explicit unavailable instead of an
+invented tie. The earlier Muse call, made before the fixes, returned
+`grounded: true` with the "no edge either way" line. The difference is the
+backend fix deployed between the two calls, not the explicit `season`; this
+pair of results does not establish any difference between explicit and
+default season handling.
+
+Still unverified through Muse after the fixes: rankings `requested_*` and
+`source_*` fields, and behaviour when a projection exists for one player
+but not the other.
 
 No Scout key is ever sent to the MCP client. The same considerations in
 `CHATGPT_APP.md` about key enforcement and `/readyz` apply here.
